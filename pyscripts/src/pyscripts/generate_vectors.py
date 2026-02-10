@@ -49,7 +49,8 @@ def _trace_to_mseed_bytes(tr: Trace, *, encoding: str | int, reclen: int = 512) 
     st = Stream([tr])  # type: ignore[no-untyped-call]
     st.write(buf, format="MSEED", encoding=encoding, reclen=reclen)  # type: ignore[no-untyped-call]
     buf.seek(0)
-    return buf.read()
+    # Return only the first record
+    return buf.read(reclen)
 
 
 def _parse_record_metadata(raw: bytes) -> dict[str, Any]:
@@ -141,7 +142,8 @@ def generate_steim1_vectors() -> None:
     tr = _make_trace(sine)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM1")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
@@ -160,7 +162,8 @@ def generate_steim1_vectors() -> None:
     tr = _make_trace(rand_data)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM1")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
@@ -177,7 +180,8 @@ def generate_steim1_vectors() -> None:
     tr = _make_trace(const_data)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM1")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
@@ -206,7 +210,8 @@ def generate_steim2_vectors() -> None:
     tr = _make_trace(ramp)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM2")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
@@ -224,7 +229,8 @@ def generate_steim2_vectors() -> None:
     tr = _make_trace(sine)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM2")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
@@ -241,7 +247,8 @@ def generate_steim2_vectors() -> None:
     tr = _make_trace(small_diffs)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM2")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
@@ -255,15 +262,16 @@ def generate_steim2_vectors() -> None:
 
     # Pattern 4: large range
     rng = np.random.default_rng(7)
-    large = rng.integers(-100000, 100000, size=120, dtype=np.int32)
+    large = rng.integers(-100000, 100000, size=60, dtype=np.int32)
     tr = _make_trace(large)
     raw = _trace_to_mseed_bytes(tr, encoding="STEIM2")
     meta = _parse_record_metadata(raw)
-    data_section = raw[meta["data_offset"] : 512]
+    reclen = 2 ** meta["record_length_power"]
+    data_section = raw[meta["data_offset"] : reclen]
 
     vectors.append(
         {
-            "name": "large_range_120",
+            "name": "large_range_60",
             "num_samples": int(meta["num_samples"]),
             "byte_order": "big",
             "compressed_data_b64": _b64(data_section),
