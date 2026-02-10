@@ -1,0 +1,15 @@
+[package]
+name = "miniseed"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Pure Rust miniSEED v2 decoder and encoder"
+repository = "https://github.com/lfrfrse/miniseed-rs"
+keywords = ["seismic", "miniseed", "steim", "mseed", "fdsn"]
+categories = ["encoding", "parser-implementations", "science"]
+
+[dependencies]
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
