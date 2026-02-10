@@ -1,3 +1,5 @@
+//! Error types for miniSEED decoding and encoding.
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]

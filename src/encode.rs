@@ -1,5 +1,11 @@
+//! Encode an [`MseedRecord`] into miniSEED v2 record bytes.
+//!
+//! The main entry point is [`encode()`], which serializes a record
+//! struct into a `Vec<u8>` of the configured record length (default 512).
+
 use crate::decode::{BTime, MseedRecord, Samples};
-use crate::steim::{self, ByteOrder};
+use crate::steim;
+use crate::types::{ByteOrder, EncodingFormat};
 use crate::{MseedError, Result};
 
 /// Encode a [`MseedRecord`] into miniSEED v2 record bytes.
@@ -65,7 +71,7 @@ pub fn encode(record: &MseedRecord) -> Result<Vec<u8>> {
     // Next blockette offset = 0 (no more blockettes)
     buf[50..52].copy_from_slice(&0u16.to_be_bytes());
     // Encoding format
-    buf[52] = record.encoding;
+    buf[52] = record.encoding.to_code();
     // Byte order (0=little, 1=big)
     buf[53] = match record.byte_order {
         ByteOrder::Big => 1,
@@ -80,8 +86,8 @@ pub fn encode(record: &MseedRecord) -> Result<Vec<u8>> {
     // For Steim: data must start at 64-byte boundary
     // For uncompressed: right after blockette 1000 (offset 56)
     let data_offset: usize = match record.encoding {
-        10 | 11 => 64, // Steim1/Steim2: 64-byte aligned
-        _ => 56,       // Uncompressed
+        EncodingFormat::Steim1 | EncodingFormat::Steim2 => 64,
+        _ => 56,
     };
 
     // Write data offset into header
@@ -141,21 +147,24 @@ fn decompose_sample_rate(rate: f64) -> Result<(i16, i16)> {
     }
 }
 
-fn encode_data(samples: &Samples, encoding: u8, byte_order: ByteOrder) -> Result<Vec<u8>> {
+fn encode_data(
+    samples: &Samples,
+    encoding: EncodingFormat,
+    byte_order: ByteOrder,
+) -> Result<Vec<u8>> {
     match encoding {
-        1 => encode_int16(samples, byte_order),
-        3 => encode_int32(samples, byte_order),
-        4 => encode_float32(samples, byte_order),
-        5 => encode_float64(samples, byte_order),
-        10 => {
+        EncodingFormat::Int16 => encode_int16(samples, byte_order),
+        EncodingFormat::Int32 => encode_int32(samples, byte_order),
+        EncodingFormat::Float32 => encode_float32(samples, byte_order),
+        EncodingFormat::Float64 => encode_float64(samples, byte_order),
+        EncodingFormat::Steim1 => {
             let ints = samples_as_int(samples)?;
             steim::encode_steim1(ints, byte_order)
         }
-        11 => {
+        EncodingFormat::Steim2 => {
             let ints = samples_as_int(samples)?;
             steim::encode_steim2(ints, byte_order)
         }
-        _ => Err(MseedError::UnsupportedEncoding(encoding)),
     }
 }
 
@@ -249,6 +258,7 @@ fn encode_float64(samples: &Samples, byte_order: ByteOrder) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::decode;
+    use crate::types::EncodingFormat;
     use std::path::Path;
 
     fn load_vectors(filename: &str) -> serde_json::Value {
@@ -358,7 +368,7 @@ mod tests {
                 fract: 1234,
             },
             sample_rate: 20.0,
-            encoding: 3, // INT32
+            encoding: EncodingFormat::Int32,
             byte_order: ByteOrder::Big,
             record_length: 512,
             samples: Samples::Int(vec![1, -2, 3, -4, 100000, -100000]),
@@ -380,7 +390,7 @@ mod tests {
         assert_eq!(decoded.start_time.second, 45);
         assert_eq!(decoded.start_time.fract, 1234);
         assert_eq!(decoded.sample_rate, 20.0);
-        assert_eq!(decoded.encoding, 3);
+        assert_eq!(decoded.encoding, EncodingFormat::Int32);
         assert_eq!(
             decoded.samples,
             Samples::Int(vec![1, -2, 3, -4, 100000, -100000])

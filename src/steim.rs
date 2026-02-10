@@ -1,10 +1,13 @@
+//! Steim1 and Steim2 compression and decompression.
+//!
+//! These are differential integer compression schemes used in seismological
+//! data (SEED/miniSEED format). See Appendix B of the SEED Manual v2.4.
+
+use crate::types::ByteOrder;
 use crate::{MseedError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ByteOrder {
-    Big,
-    Little,
-}
+#[deprecated(note = "use `miniseed::ByteOrder` (re-exported from `types`) instead")]
+pub type ByteOrderAlias = ByteOrder;
 
 const FRAME_SIZE: usize = 64; // 16 x 32-bit words
 const WORDS_PER_FRAME: usize = 16;

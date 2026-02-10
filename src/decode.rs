@@ -1,8 +1,17 @@
-use crate::steim::{self, ByteOrder};
+//! Decode miniSEED v2 records from raw bytes.
+//!
+//! The main entry point is [`decode()`], which parses a single 512-byte
+//! record into an [`MseedRecord`]. For multi-record data, see
+//! [`MseedReader`](crate::MseedReader).
+
+use std::fmt;
+
+use crate::steim;
+use crate::types::{ByteOrder, EncodingFormat};
 use crate::{MseedError, Result};
 
 /// Decoded miniSEED v2 record.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MseedRecord {
     pub sequence_number: String,
     pub quality: char,
@@ -12,7 +21,7 @@ pub struct MseedRecord {
     pub network: String,
     pub start_time: BTime,
     pub sample_rate: f64,
-    pub encoding: u8,
+    pub encoding: EncodingFormat,
     pub byte_order: ByteOrder,
     pub record_length: u16,
     pub samples: Samples,
@@ -27,6 +36,113 @@ pub struct BTime {
     pub minute: u8,
     pub second: u8,
     pub fract: u16, // 0.0001 second units
+}
+
+impl MseedRecord {
+    /// Create a new `MseedRecord` with sensible defaults.
+    ///
+    /// Defaults: sequence "000001", quality 'D', empty NSLC,
+    /// big-endian, 512-byte records, INT32, no samples.
+    pub fn new() -> Self {
+        Self {
+            sequence_number: "000001".into(),
+            quality: 'D',
+            station: String::new(),
+            location: String::new(),
+            channel: String::new(),
+            network: String::new(),
+            start_time: BTime {
+                year: 1970,
+                day: 1,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                fract: 0,
+            },
+            sample_rate: 1.0,
+            encoding: EncodingFormat::Int32,
+            byte_order: ByteOrder::Big,
+            record_length: 512,
+            samples: Samples::Int(vec![]),
+        }
+    }
+
+    /// Set network, station, location, and channel codes.
+    pub fn with_nslc(
+        mut self,
+        network: &str,
+        station: &str,
+        location: &str,
+        channel: &str,
+    ) -> Self {
+        self.network = network.into();
+        self.station = station.into();
+        self.location = location.into();
+        self.channel = channel.into();
+        self
+    }
+
+    /// Set the start time.
+    pub fn with_start_time(mut self, time: BTime) -> Self {
+        self.start_time = time;
+        self
+    }
+
+    /// Set the sample rate in Hz.
+    pub fn with_sample_rate(mut self, rate: f64) -> Self {
+        self.sample_rate = rate;
+        self
+    }
+
+    /// Set the encoding format.
+    pub fn with_encoding(mut self, enc: EncodingFormat) -> Self {
+        self.encoding = enc;
+        self
+    }
+
+    /// Set the sample data.
+    pub fn with_samples(mut self, samples: Samples) -> Self {
+        self.samples = samples;
+        self
+    }
+
+    /// Return the NSLC identifier: `"NET.STA.LOC.CHA"`.
+    pub fn nslc(&self) -> String {
+        format!(
+            "{}.{}.{}.{}",
+            self.network, self.station, self.location, self.channel
+        )
+    }
+}
+
+impl Default for MseedRecord {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for MseedRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} | {} | {} Hz | {} samples ({})",
+            self.nslc(),
+            self.start_time,
+            self.sample_rate,
+            self.samples.len(),
+            self.encoding,
+        )
+    }
+}
+
+impl fmt::Display for BTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:04}-{:03} {:02}:{:02}:{:02}.{:04}",
+            self.year, self.day, self.hour, self.minute, self.second, self.fract
+        )
+    }
 }
 
 /// Decoded sample data.
@@ -112,9 +228,11 @@ pub fn decode(data: &[u8]) -> Result<MseedRecord> {
     };
     let record_length = 1u16 << record_length_power;
 
+    let encoding_format = EncodingFormat::from_code(encoding)?;
+
     // Decode data section
     let data_section = &data[data_offset..record_length as usize];
-    let samples = decode_data(data_section, encoding, num_samples, byte_order)?;
+    let samples = decode_data(data_section, encoding_format, num_samples, byte_order)?;
 
     Ok(MseedRecord {
         sequence_number,
@@ -125,7 +243,7 @@ pub fn decode(data: &[u8]) -> Result<MseedRecord> {
         network,
         start_time,
         sample_rate,
-        encoding,
+        encoding: encoding_format,
         byte_order,
         record_length,
         samples,
@@ -170,24 +288,23 @@ fn find_blockette_1000(data: &[u8], mut offset: usize) -> Result<(u8, u8, u8)> {
 
 fn decode_data(
     data: &[u8],
-    encoding: u8,
+    encoding: EncodingFormat,
     num_samples: usize,
     byte_order: ByteOrder,
 ) -> Result<Samples> {
     match encoding {
-        1 => decode_int16(data, num_samples, byte_order),
-        3 => decode_int32(data, num_samples, byte_order),
-        4 => decode_float32(data, num_samples, byte_order),
-        5 => decode_float64(data, num_samples, byte_order),
-        10 => {
+        EncodingFormat::Int16 => decode_int16(data, num_samples, byte_order),
+        EncodingFormat::Int32 => decode_int32(data, num_samples, byte_order),
+        EncodingFormat::Float32 => decode_float32(data, num_samples, byte_order),
+        EncodingFormat::Float64 => decode_float64(data, num_samples, byte_order),
+        EncodingFormat::Steim1 => {
             let samples = steim::decode_steim1(data, num_samples, byte_order)?;
             Ok(Samples::Int(samples))
         }
-        11 => {
+        EncodingFormat::Steim2 => {
             let samples = steim::decode_steim2(data, num_samples, byte_order)?;
             Ok(Samples::Int(samples))
         }
-        _ => Err(MseedError::UnsupportedEncoding(encoding)),
     }
 }
 
@@ -449,7 +566,7 @@ mod tests {
                 "{name}: fract"
             );
             assert_eq!(
-                record.encoding,
+                record.encoding.to_code(),
                 expected["encoding_format"].as_u64().unwrap() as u8,
                 "{name}: encoding"
             );
