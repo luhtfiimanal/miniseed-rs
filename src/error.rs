@@ -19,6 +19,9 @@ pub enum MseedError {
 
     #[error("sample count mismatch: header says {expected}, decoded {actual}")]
     SampleCountMismatch { expected: usize, actual: usize },
+
+    #[error("encode error: {0}")]
+    EncodeError(String),
 }
 
 pub type Result<T> = std::result::Result<T, MseedError>;
