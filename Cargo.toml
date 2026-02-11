@@ -14,7 +14,12 @@ exclude = ["pyscripts/", "CLAUDE.md", "PROMPT.md"]
 thiserror = "2"
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 serde_json = "1"
+
+[[bench]]
+name = "codec"
+harness = false
 
 [package.metadata.docs.rs]
 all-features = true

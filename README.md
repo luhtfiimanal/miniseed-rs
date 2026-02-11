@@ -164,11 +164,36 @@ cd pyscripts && uv run python -m pyscripts.generate_vectors
 cargo test
 ```
 
+## Benchmarks
+
+Measured with [Criterion.rs](https://github.com/bheisler/criterion.rs) on 100 seismic-like samples. Run `cargo bench` to reproduce on your machine.
+
+| Operation | Format | Encoding | Time | Throughput |
+|-----------|--------|----------|-----:|------------|
+| Decode | v2 | Steim1 | 391 ns | 256 Msamp/s |
+| Decode | v2 | Steim2 | 414 ns | 242 Msamp/s |
+| Decode | v2 | INT32 | 439 ns | 228 Msamp/s |
+| Decode | v3 | Steim1 | 760 ns | 132 Msamp/s |
+| Decode | v3 | Steim2 | 776 ns | 129 Msamp/s |
+| Decode | v3 | INT32 | 1.34 us | 75 Msamp/s |
+| Encode | v2 | Steim1 | 196 ns | 511 Msamp/s |
+| Encode | v2 | Steim2 | 216 ns | 464 Msamp/s |
+| Encode | v2 | INT32 | 113 ns | 889 Msamp/s |
+| Encode | v3 | Steim1 | 534 ns | 187 Msamp/s |
+| Encode | v3 | Steim2 | 559 ns | 179 Msamp/s |
+| Encode | v3 | INT32 | 944 ns | 106 Msamp/s |
+| Roundtrip | v2 | Steim2 | 681 ns | 147 Msamp/s |
+| Roundtrip | v3 | Steim2 | 1.37 us | 73 Msamp/s |
+| Reader | mixed v2+v3 (10 records) | Steim2 | 7.05 us | -- |
+
+v3 includes CRC-32C computation overhead. Throughput is in millions of samples per second.
+
 ## Development
 
 ```bash
 cargo build                     # build
 cargo test                      # all tests
+cargo bench                     # benchmarks (criterion)
 cargo clippy -- -D warnings     # lint (strict)
 cargo fmt -- --check            # format check
 cargo doc --no-deps --open      # browse docs locally
