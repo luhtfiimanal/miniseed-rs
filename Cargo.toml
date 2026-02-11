@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Pure Rust miniSEED v2 decoder and encoder"
-repository = "https://github.com/lfrfrse/miniseed-rs"
+repository = "https://github.com/luhtfiimanal/miniseed-rs"
+readme = "README.md"
 keywords = ["seismic", "miniseed", "steim", "mseed", "fdsn"]
 categories = ["encoding", "parser-implementations", "science"]
+exclude = ["pyscripts/", "CLAUDE.md", "PROMPT.md"]
 
 [dependencies]
 thiserror = "2"
