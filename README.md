@@ -188,6 +188,8 @@ Measured with [Criterion.rs](https://github.com/bheisler/criterion.rs) on 100 se
 
 v3 includes CRC-32C computation overhead. Throughput is in millions of samples per second.
 
+*Platform: AMD Ryzen 5 5600G (6C/12T, 4.46 GHz), 16 GB DDR4, Linux 6.14, rustc 1.92.0, `--release`*
+
 ## Development
 
 ```bash
