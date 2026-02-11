@@ -2,6 +2,8 @@
 
 Pure Rust miniSEED v2 decoder and encoder. Zero `unsafe`, zero C dependencies.
 
+[![Crates.io](https://img.shields.io/crates/v/miniseed-rs.svg)](https://crates.io/crates/miniseed-rs)
+[![docs.rs](https://docs.rs/miniseed-rs/badge.svg)](https://docs.rs/miniseed-rs)
 [![CI](https://github.com/luhtfiimanal/miniseed-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/luhtfiimanal/miniseed-rs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org/)
