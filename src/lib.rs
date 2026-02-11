@@ -7,7 +7,7 @@
 //! # Decoding a record
 //!
 //! ```
-//! use miniseed::{decode, encode, MseedRecord, Samples, EncodingFormat, BTime};
+//! use miniseed_rs::{decode, encode, MseedRecord, Samples, EncodingFormat, BTime};
 //!
 //! // Build a record, encode it, then decode the bytes
 //! let record = MseedRecord::new()
@@ -26,7 +26,7 @@
 //! # Iterating multi-record data
 //!
 //! ```
-//! use miniseed::{encode, MseedRecord, MseedReader, Samples};
+//! use miniseed_rs::{encode, MseedRecord, MseedReader, Samples};
 //!
 //! // Concatenate two encoded records
 //! let r1 = MseedRecord::new()
@@ -51,7 +51,7 @@
 //! # Building a record from scratch
 //!
 //! ```
-//! use miniseed::{MseedRecord, Samples, EncodingFormat, BTime, encode};
+//! use miniseed_rs::{MseedRecord, Samples, EncodingFormat, BTime, encode};
 //!
 //! let record = MseedRecord::new()
 //!     .with_nslc("XX", "TEST", "00", "BHZ")

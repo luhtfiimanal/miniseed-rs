@@ -13,7 +13,7 @@ use crate::decode::{self, MseedRecord};
 /// # Example
 ///
 /// ```
-/// use miniseed::{encode, MseedRecord, MseedReader, Samples};
+/// use miniseed_rs::{encode, MseedRecord, MseedReader, Samples};
 ///
 /// let record = MseedRecord::new()
 ///     .with_nslc("XX", "TEST", "00", "BHZ")

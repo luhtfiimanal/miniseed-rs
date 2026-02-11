@@ -1,6 +1,6 @@
 //! Compile-time smoke test: verify top-level re-exports work.
 
-use miniseed::{
+use miniseed_rs::{
     BTime, ByteOrder, EncodingFormat, MseedError, MseedRecord, Result, Samples, decode, encode,
 };
 

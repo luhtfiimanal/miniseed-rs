@@ -30,13 +30,13 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-miniseed = { git = "https://github.com/luhtfiimanal/miniseed-rs" }
+miniseed-rs = "0.1"
 ```
 
 ### Decode a record
 
 ```rust
-use miniseed::{decode, encode, MseedRecord, Samples};
+use miniseed_rs::{decode, encode, MseedRecord, Samples};
 
 // Build a record, encode it, then decode
 let record = MseedRecord::new()
@@ -55,7 +55,7 @@ assert_eq!(decoded.samples.len(), 3);
 ### Read a multi-record file
 
 ```rust
-use miniseed::MseedReader;
+use miniseed_rs::MseedReader;
 
 let data = std::fs::read("waveform.mseed").unwrap();
 for result in MseedReader::new(&data) {
@@ -68,7 +68,7 @@ for result in MseedReader::new(&data) {
 ### Build a record from scratch
 
 ```rust
-use miniseed::{MseedRecord, Samples, EncodingFormat, BTime, encode};
+use miniseed_rs::{MseedRecord, Samples, EncodingFormat, BTime, encode};
 
 let record = MseedRecord::new()
     .with_nslc("XX", "TEST", "00", "BHZ")
@@ -88,7 +88,7 @@ assert_eq!(bytes.len(), 512);
 
 ```rust
 // Top-level imports -- everything you need
-use miniseed::{
+use miniseed_rs::{
     decode, encode,           // functions
     MseedRecord, MseedReader, // core types
     BTime, Samples,           // data types
