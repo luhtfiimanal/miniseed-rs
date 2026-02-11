@@ -1,7 +1,8 @@
 //! Decode miniSEED v2 records from raw bytes.
 //!
-//! The main entry point is [`decode()`], which parses a single 512-byte
-//! record into an [`MseedRecord`]. For multi-record data, see
+//! The main entry point is [`decode()`], which parses a single miniSEED v2
+//! record (any power-of-2 length: 256, 512, 4096, etc.) into an
+//! [`MseedRecord`]. For multi-record data, see
 //! [`MseedReader`](crate::MseedReader).
 
 use std::fmt;
@@ -616,6 +617,48 @@ mod tests {
                         .collect();
                     assert_eq!(samples, &expected, "{name}: double samples mismatch");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn test_4096_record_decode() {
+        let vectors = load_vectors("record_4096_vectors.json");
+        let arr = vectors.as_array().unwrap();
+
+        for v in arr {
+            let name = v["name"].as_str().unwrap();
+            let raw = decode_b64(v["record_b64"].as_str().unwrap());
+            let expected_len = v["record_length"].as_u64().unwrap() as usize;
+
+            assert_eq!(raw.len(), expected_len, "{name}: raw record length");
+
+            let record = decode(&raw).unwrap_or_else(|e| {
+                panic!("decode failed for {name}: {e}");
+            });
+
+            assert_eq!(
+                record.record_length as usize, expected_len,
+                "{name}: decoded record_length"
+            );
+            assert_eq!(
+                record.station,
+                v["station"].as_str().unwrap(),
+                "{name}: station"
+            );
+
+            let expected_samples: Vec<i32> = v["expected_samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_i64().unwrap() as i32)
+                .collect();
+
+            match &record.samples {
+                Samples::Int(samples) => {
+                    assert_eq!(samples, &expected_samples, "{name}: samples mismatch");
+                }
+                other => panic!("{name}: expected Int samples, got {other:?}"),
             }
         }
     }

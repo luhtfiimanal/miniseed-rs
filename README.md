@@ -2,18 +2,19 @@
 
 Pure Rust miniSEED v2 decoder and encoder. Zero `unsafe`, zero C dependencies.
 
+[![CI](https://github.com/luhtfiimanal/miniseed-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/luhtfiimanal/miniseed-rs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org/)
 
 ## What is miniSEED?
 
-[miniSEED](http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf) is the standard binary format for seismological waveform data, used by earthquake monitoring networks worldwide (IRIS, FDSN, BMKG, etc.). Each record is a self-contained 512-byte packet containing station metadata, timestamps, and compressed sample data.
+[miniSEED](http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf) is the standard binary format for seismological waveform data, used by earthquake monitoring networks worldwide (IRIS, FDSN, BMKG, etc.). Each record is a self-contained packet (typically 512 or 4096 bytes, any power-of-2 length) containing station metadata, timestamps, and compressed sample data.
 
 This crate provides idiomatic Rust access to miniSEED v2 records with full encode/decode support.
 
 ## Features
 
-- **Decode** miniSEED v2 records: fixed header (48 bytes) + Blockette 1000 + data section
+- **Decode** miniSEED v2 records (any power-of-2 length: 256, 512, 4096, etc.)
 - **Encode** `MseedRecord` structs back to valid miniSEED bytes
 - **Steim1/Steim2** compression and decompression (differential integer encoding)
 - **Uncompressed** formats: INT16, INT32, FLOAT32, FLOAT64
@@ -149,7 +150,7 @@ cargo test
 
 ```bash
 cargo build                     # build
-cargo test                      # 14 unit + 1 integration + 4 doc tests
+cargo test                      # 19 unit + 1 integration + 4 doc tests
 cargo clippy -- -D warnings     # lint (strict)
 cargo fmt -- --check            # format check
 cargo doc --no-deps --open      # browse docs locally

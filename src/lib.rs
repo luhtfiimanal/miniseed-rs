@@ -1,7 +1,8 @@
 //! Pure Rust miniSEED v2 decoder and encoder.
 //!
 //! Zero `unsafe`, zero C dependencies. Supports Steim1/2 compression,
-//! uncompressed INT16/32, FLOAT32/64, and 512-byte records.
+//! uncompressed INT16/32, FLOAT32/64, and any power-of-2 record length
+//! (256, 512, 4096, etc.).
 //!
 //! # Decoding a record
 //!

@@ -350,6 +350,76 @@ mod tests {
     }
 
     #[test]
+    fn test_4096_roundtrip() {
+        let vectors = load_vectors("record_4096_vectors.json");
+        let arr = vectors.as_array().unwrap();
+
+        for v in arr {
+            let name = v["name"].as_str().unwrap();
+            let raw = decode_b64(v["record_b64"].as_str().unwrap());
+
+            // Decode the 4096-byte record
+            let record = decode::decode(&raw).unwrap_or_else(|e| {
+                panic!("initial decode failed for {name}: {e}");
+            });
+            assert_eq!(record.record_length, 4096, "{name}: record_length");
+
+            // Re-encode
+            let encoded = encode(&record).unwrap_or_else(|e| {
+                panic!("encode failed for {name}: {e}");
+            });
+            assert_eq!(encoded.len(), 4096, "{name}: encoded length");
+
+            // Decode again and compare
+            let record2 = decode::decode(&encoded).unwrap_or_else(|e| {
+                panic!("re-decode failed for {name}: {e}");
+            });
+
+            assert_eq!(record.station, record2.station, "{name}: station");
+            assert_eq!(
+                record.record_length, record2.record_length,
+                "{name}: record_length"
+            );
+            assert_eq!(record.samples, record2.samples, "{name}: samples");
+        }
+    }
+
+    #[test]
+    fn test_encode_4096_from_scratch() {
+        // Build a 4096-byte record from scratch
+        let samples: Vec<i32> = (0..500).collect();
+        let record = MseedRecord {
+            sequence_number: "000001".into(),
+            quality: 'D',
+            station: "BIG".into(),
+            location: "00".into(),
+            channel: "BHZ".into(),
+            network: "XX".into(),
+            start_time: BTime {
+                year: 2025,
+                day: 1,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                fract: 0,
+            },
+            sample_rate: 100.0,
+            encoding: EncodingFormat::Int32,
+            byte_order: ByteOrder::Big,
+            record_length: 4096,
+            samples: Samples::Int(samples.clone()),
+        };
+
+        let encoded = encode(&record).unwrap();
+        assert_eq!(encoded.len(), 4096);
+
+        let decoded = decode::decode(&encoded).unwrap();
+        assert_eq!(decoded.record_length, 4096);
+        assert_eq!(decoded.station, "BIG");
+        assert_eq!(decoded.samples, Samples::Int(samples));
+    }
+
+    #[test]
     fn test_encode_from_scratch() {
         // Build a record from scratch, encode, decode, verify
         let record = MseedRecord {

@@ -175,6 +175,137 @@ mod tests {
     }
 
     #[test]
+    fn test_reader_mixed_record_sizes() {
+        // 512-byte record + 4096-byte record in one stream
+        let small = MseedRecord {
+            sequence_number: "000001".into(),
+            quality: 'D',
+            station: "SM".into(),
+            location: "00".into(),
+            channel: "BHZ".into(),
+            network: "XX".into(),
+            start_time: BTime {
+                year: 2025,
+                day: 1,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                fract: 0,
+            },
+            sample_rate: 20.0,
+            encoding: EncodingFormat::Int32,
+            byte_order: ByteOrder::Big,
+            record_length: 512,
+            samples: Samples::Int(vec![1, 2, 3]),
+        };
+        let big = MseedRecord {
+            record_length: 4096,
+            station: "LG".into(),
+            samples: Samples::Int((0..500).collect()),
+            ..small.clone()
+        };
+
+        let mut data = encode::encode(&small).unwrap();
+        assert_eq!(data.len(), 512);
+        let big_bytes = encode::encode(&big).unwrap();
+        assert_eq!(big_bytes.len(), 4096);
+        data.extend_from_slice(&big_bytes);
+
+        let records: Vec<_> = MseedReader::new(&data)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].station, "SM");
+        assert_eq!(records[0].record_length, 512);
+        assert_eq!(records[0].samples.len(), 3);
+        assert_eq!(records[1].station, "LG");
+        assert_eq!(records[1].record_length, 4096);
+        assert_eq!(records[1].samples.len(), 500);
+    }
+
+    #[test]
+    fn test_reader_mixed_from_vectors() {
+        // Load mixed record stream from test vectors
+        let vectors_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("pyscripts")
+            .join("test_vectors");
+        let path = vectors_dir.join("mixed_record_vectors.json");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
+        let vectors: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let arr = vectors.as_array().unwrap();
+
+        for v in arr {
+            let name = v["name"].as_str().unwrap();
+
+            // Inline base64 decode
+            let stream_b64 = v["stream_b64"].as_str().unwrap();
+            let stream_bytes = {
+                let mut result = Vec::new();
+                let bytes: Vec<u8> = stream_b64
+                    .bytes()
+                    .filter(|b| !matches!(b, b'\n' | b'\r' | b' '))
+                    .collect();
+                let mut i = 0;
+                while i + 3 < bytes.len() {
+                    let a = b64(bytes[i]);
+                    let b = b64(bytes[i + 1]);
+                    let c = b64(bytes[i + 2]);
+                    let d = b64(bytes[i + 3]);
+                    let triple = (a << 18) | (b << 12) | (c << 6) | d;
+                    result.push((triple >> 16) as u8);
+                    if bytes[i + 2] != b'=' {
+                        result.push((triple >> 8) as u8);
+                    }
+                    if bytes[i + 3] != b'=' {
+                        result.push(triple as u8);
+                    }
+                    i += 4;
+                }
+                result
+            };
+
+            let records: Vec<_> = MseedReader::new(&stream_bytes)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap_or_else(|e| panic!("reader failed for {name}: {e}"));
+
+            let expected_records = v["records"].as_array().unwrap();
+            assert_eq!(
+                records.len(),
+                expected_records.len(),
+                "{name}: record count"
+            );
+
+            for (rec, exp) in records.iter().zip(expected_records.iter()) {
+                let exp_station = exp["station"].as_str().unwrap();
+                assert_eq!(rec.station, exp_station, "{name}: station");
+                assert_eq!(
+                    rec.record_length,
+                    exp["record_length"].as_u64().unwrap() as u16,
+                    "{name}: record_length for {exp_station}"
+                );
+                assert_eq!(
+                    rec.samples.len(),
+                    exp["num_samples"].as_u64().unwrap() as usize,
+                    "{name}: num_samples for {exp_station}"
+                );
+            }
+        }
+    }
+
+    fn b64(ch: u8) -> u32 {
+        match ch {
+            b'A'..=b'Z' => (ch - b'A') as u32,
+            b'a'..=b'z' => (ch - b'a' + 26) as u32,
+            b'0'..=b'9' => (ch - b'0' + 52) as u32,
+            b'+' => 62,
+            b'/' => 63,
+            _ => 0,
+        }
+    }
+
+    #[test]
     fn test_reader_empty_data() {
         let records: Vec<_> = MseedReader::new(&[]).collect();
         assert!(records.is_empty());

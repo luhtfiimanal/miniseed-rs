@@ -472,6 +472,119 @@ def generate_roundtrip_vectors() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 4096-byte record vectors
+# ---------------------------------------------------------------------------
+
+
+def generate_4096_vectors() -> None:
+    vectors: list[dict[str, Any]] = []
+
+    # Steim1 4096-byte record (~900 samples fit)
+    rng = np.random.default_rng(2024)
+    steim1_data = np.cumsum(rng.integers(-500, 500, size=900)).astype(np.int32)
+    tr = _make_trace(steim1_data, station="S4K1")
+    raw = _trace_to_mseed_bytes(tr, encoding="STEIM1", reclen=4096)
+    meta = _parse_record_metadata(raw)
+    assert 2 ** meta["record_length_power"] == 4096, "record length must be 4096"
+
+    vectors.append(
+        {
+            "name": "steim1_4096",
+            "record_b64": _b64(raw[:4096]),
+            "encoding": meta["encoding_format"],
+            "num_samples": int(meta["num_samples"]),
+            "expected_samples": steim1_data.tolist(),
+            "record_length": 4096,
+            "network": "IU",
+            "station": "S4K1",
+        }
+    )
+
+    # Steim2 4096-byte record
+    steim2_data = np.cumsum(rng.integers(-100, 100, size=800)).astype(np.int32)
+    tr = _make_trace(steim2_data, station="S4K2")
+    raw = _trace_to_mseed_bytes(tr, encoding="STEIM2", reclen=4096)
+    meta = _parse_record_metadata(raw)
+
+    vectors.append(
+        {
+            "name": "steim2_4096",
+            "record_b64": _b64(raw[:4096]),
+            "encoding": meta["encoding_format"],
+            "num_samples": int(meta["num_samples"]),
+            "expected_samples": steim2_data.tolist(),
+            "record_length": 4096,
+            "network": "IU",
+            "station": "S4K2",
+        }
+    )
+
+    # INT32 4096-byte record
+    int32_data = rng.integers(-1000000, 1000000, size=500, dtype=np.int32)
+    tr = _make_trace(int32_data, station="S4K3")
+    raw = _trace_to_mseed_bytes(tr, encoding="INT32", reclen=4096)
+    meta = _parse_record_metadata(raw)
+
+    vectors.append(
+        {
+            "name": "int32_4096",
+            "record_b64": _b64(raw[:4096]),
+            "encoding": meta["encoding_format"],
+            "num_samples": int(meta["num_samples"]),
+            "expected_samples": int32_data.tolist(),
+            "record_length": 4096,
+            "network": "IU",
+            "station": "S4K3",
+        }
+    )
+
+    _write_json("record_4096_vectors.json", vectors)
+    print(f"  4096-byte: {len(vectors)} vectors")
+
+
+def generate_mixed_record_stream() -> None:
+    """Generate a stream with 512-byte + 4096-byte records concatenated."""
+    vectors: list[dict[str, Any]] = []
+
+    # 512-byte record
+    data_512 = np.arange(0, 50, dtype=np.int32)
+    tr_512 = _make_trace(data_512, station="MIX1")
+    raw_512 = _trace_to_mseed_bytes(tr_512, encoding="STEIM1", reclen=512)
+
+    # 4096-byte record
+    data_4096 = np.arange(0, 200, dtype=np.int32)
+    tr_4096 = _make_trace(data_4096, station="MIX2")
+    raw_4096 = _trace_to_mseed_bytes(tr_4096, encoding="STEIM1", reclen=4096)
+
+    # Concatenated stream
+    stream_bytes = raw_512[:512] + raw_4096[:4096]
+
+    vectors.append(
+        {
+            "name": "mixed_512_4096",
+            "stream_b64": _b64(stream_bytes),
+            "records": [
+                {
+                    "station": "MIX1",
+                    "num_samples": len(data_512),
+                    "record_length": 512,
+                    "expected_samples": data_512.tolist(),
+                },
+                {
+                    "station": "MIX2",
+                    "num_samples": len(data_4096),
+                    "record_length": 4096,
+                    "expected_samples": data_4096.tolist(),
+                },
+            ],
+        }
+    )
+
+    _write_json("mixed_record_vectors.json", vectors)
+    print(f"  mixed records: {len(vectors)} vectors")
+
+
+# ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
 
@@ -490,6 +603,8 @@ def main() -> None:
     generate_header_vectors()
     generate_uncompressed_vectors()
     generate_roundtrip_vectors()
+    generate_4096_vectors()
+    generate_mixed_record_stream()
     print(f"Done. Vectors written to {VECTORS_DIR}")
 
 
