@@ -1,0 +1,68 @@
+[
+  {
+    "name": "int16",
+    "record_b64": "TVMDAAAAAADoBw8ACh4AAQAAAAAAADRABwAAAP5ZMOcAFQAADgAAAEZEU046SVVfQU5NT18wMF9CX0hfWgAAAQD///9/AIBkADj/",
+    "record_length": 75,
+    "encoding": 1,
+    "num_samples": 7,
+    "expected_samples": [
+      0,
+      1,
+      -1,
+      32767,
+      -32768,
+      100,
+      -200
+    ],
+    "data_offset": 61
+  },
+  {
+    "name": "int32",
+    "record_b64": "TVMDAAAAAADoBw8ACh4AAwAAAAAAADRABwAAALRNRgUAFQAAHAAAAEZEU046SVVfQU5NT18wMF9CX0hfWgAAAAABAAAA/////////38AAACAoIYBAMG98P8=",
+    "record_length": 89,
+    "encoding": 3,
+    "num_samples": 7,
+    "expected_samples": [
+      0,
+      1,
+      -1,
+      2147483647,
+      -2147483648,
+      100000,
+      -999999
+    ],
+    "data_offset": 61
+  },
+  {
+    "name": "float32",
+    "record_b64": "TVMDAAAAAADoBw8ACh4ABAAAAAAAADRABgAAAF3xBmMAFQAAGAAAAEZEU046SVVfQU5NT18wMF9CX0hfWgAAAAAAAMA/AADAv9APSUD5AhVQrMUntw==",
+    "record_length": 85,
+    "encoding": 4,
+    "num_samples": 6,
+    "expected_samples": [
+      0.0,
+      1.5,
+      -1.5,
+      3.141590118408203,
+      10000000000.0,
+      -9.999999747378752e-06
+    ],
+    "data_offset": 61
+  },
+  {
+    "name": "float64",
+    "record_b64": "TVMDAAAAAADoBw8ACh4ABQAAAAAAADRABgAAAOfw+JkAFQAAMAAAAEZEU046SVVfQU5NT18wMF9CX0hfWgAAAAAAAAAAAAAAAAAA+D8AAAAAAAD4vxgtRFT7IQlAfcOUJa1JslQWVueerwPSvA==",
+    "record_length": 109,
+    "encoding": 5,
+    "num_samples": 6,
+    "expected_samples": [
+      0.0,
+      1.5,
+      -1.5,
+      3.141592653589793,
+      1e+100,
+      -1e-15
+    ],
+    "data_offset": 61
+  }
+]

@@ -1,7 +1,8 @@
 //! Compile-time smoke test: verify top-level re-exports work.
 
 use miniseed_rs::{
-    BTime, ByteOrder, EncodingFormat, MseedError, MseedRecord, Result, Samples, decode, encode,
+    BTime, ByteOrder, EncodingFormat, FormatVersion, MseedError, MseedRecord, NanoTime, Result,
+    Samples, SourceId, decode, encode,
 };
 
 #[test]
@@ -20,8 +21,12 @@ fn top_level_imports_compile() {
         second: 0,
         fract: 0,
     };
+    let _nt = NanoTime::epoch();
 
     let _enc = EncodingFormat::Steim1;
+    let _fv = FormatVersion::V2;
+
+    let _sid = SourceId::from_nslc("IU", "ANMO", "00", "BHZ");
 
     // MseedError is accessible
     let _e: Option<MseedError> = None;

@@ -10,11 +10,20 @@ pub enum MseedError {
     #[error("invalid fixed header")]
     InvalidHeader,
 
+    #[error("invalid v3 header: {0}")]
+    InvalidV3Header(String),
+
+    #[error("CRC-32C mismatch: stored {stored:#010X}, computed {computed:#010X}")]
+    CrcMismatch { stored: u32, computed: u32 },
+
     #[error("unsupported encoding format: {0}")]
     UnsupportedEncoding(u8),
 
     #[error("blockette 1000 not found")]
     MissingBlockette1000,
+
+    #[error("unrecognized record format")]
+    UnrecognizedFormat,
 
     #[error("steim decode error: {0}")]
     SteimDecode(String),

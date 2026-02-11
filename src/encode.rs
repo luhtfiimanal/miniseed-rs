@@ -1,15 +1,27 @@
-//! Encode an [`MseedRecord`] into miniSEED v2 record bytes.
+//! Encode an [`MseedRecord`] into miniSEED record bytes.
 //!
-//! The main entry point is [`encode()`], which serializes a record
-//! struct into a `Vec<u8>` of the configured record length (default 512).
+//! The main entry point is [`encode()`], which serializes a record struct
+//! into a `Vec<u8>`. For v2 records the output is fixed-length (default 512);
+//! for v3 records it is variable-length.
 
-use crate::decode::{BTime, MseedRecord, Samples};
+use crate::record::{MseedRecord, Samples};
 use crate::steim;
-use crate::types::{ByteOrder, EncodingFormat};
+use crate::time::BTime;
+use crate::types::{ByteOrder, EncodingFormat, FormatVersion};
 use crate::{MseedError, Result};
 
-/// Encode a [`MseedRecord`] into miniSEED v2 record bytes.
+/// Encode a [`MseedRecord`] into miniSEED record bytes.
+///
+/// Dispatches to v2 or v3 encoding based on [`MseedRecord::format_version`].
 pub fn encode(record: &MseedRecord) -> Result<Vec<u8>> {
+    match record.format_version {
+        FormatVersion::V2 => encode_v2(record),
+        FormatVersion::V3 => crate::encode_v3::encode_v3(record),
+    }
+}
+
+/// Encode a [`MseedRecord`] into miniSEED v2 record bytes.
+fn encode_v2(record: &MseedRecord) -> Result<Vec<u8>> {
     let rec_len = record.record_length as usize;
     let rec_len_power = record
         .record_length
@@ -44,8 +56,9 @@ pub fn encode(record: &MseedRecord) -> Result<Vec<u8>> {
     // Network (bytes 18-19)
     write_padded(&mut buf[18..20], &record.network);
 
-    // BTIME (bytes 20-29)
-    write_btime(&mut buf[20..30], &record.start_time);
+    // BTIME (bytes 20-29) — convert NanoTime to BTime for v2
+    let btime = record.start_time.to_btime();
+    write_btime(&mut buf[20..30], &btime);
 
     // Number of samples (bytes 30-31)
     let num_samples = record.samples.len() as u16;
@@ -147,7 +160,7 @@ fn decompose_sample_rate(rate: f64) -> Result<(i16, i16)> {
     }
 }
 
-fn encode_data(
+pub(crate) fn encode_data(
     samples: &Samples,
     encoding: EncodingFormat,
     byte_order: ByteOrder,
@@ -258,6 +271,7 @@ fn encode_float64(samples: &Samples, byte_order: ByteOrder) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::decode;
+    use crate::time::BTime;
     use crate::types::EncodingFormat;
     use std::path::Path;
 
@@ -386,29 +400,24 @@ mod tests {
 
     #[test]
     fn test_encode_4096_from_scratch() {
+        use crate::time::NanoTime;
+
         // Build a 4096-byte record from scratch
         let samples: Vec<i32> = (0..500).collect();
-        let record = MseedRecord {
-            sequence_number: "000001".into(),
-            quality: 'D',
-            station: "BIG".into(),
-            location: "00".into(),
-            channel: "BHZ".into(),
-            network: "XX".into(),
-            start_time: BTime {
+        let record = MseedRecord::new()
+            .with_nslc("XX", "BIG", "00", "BHZ")
+            .with_start_time(NanoTime {
                 year: 2025,
                 day: 1,
                 hour: 0,
                 minute: 0,
                 second: 0,
-                fract: 0,
-            },
-            sample_rate: 100.0,
-            encoding: EncodingFormat::Int32,
-            byte_order: ByteOrder::Big,
-            record_length: 4096,
-            samples: Samples::Int(samples.clone()),
-        };
+                nanosecond: 0,
+            })
+            .with_sample_rate(100.0)
+            .with_encoding(EncodingFormat::Int32)
+            .with_record_length(4096)
+            .with_samples(Samples::Int(samples.clone()));
 
         let encoded = encode(&record).unwrap();
         assert_eq!(encoded.len(), 4096);
@@ -421,28 +430,22 @@ mod tests {
 
     #[test]
     fn test_encode_from_scratch() {
+        use crate::time::NanoTime;
+
         // Build a record from scratch, encode, decode, verify
-        let record = MseedRecord {
-            sequence_number: "000001".into(),
-            quality: 'D',
-            station: "TEST".into(),
-            location: "00".into(),
-            channel: "BHZ".into(),
-            network: "XX".into(),
-            start_time: BTime {
+        let record = MseedRecord::new()
+            .with_nslc("XX", "TEST", "00", "BHZ")
+            .with_start_time(NanoTime::from_btime(&BTime {
                 year: 2025,
                 day: 100,
                 hour: 12,
                 minute: 30,
                 second: 45,
                 fract: 1234,
-            },
-            sample_rate: 20.0,
-            encoding: EncodingFormat::Int32,
-            byte_order: ByteOrder::Big,
-            record_length: 512,
-            samples: Samples::Int(vec![1, -2, 3, -4, 100000, -100000]),
-        };
+            }))
+            .with_sample_rate(20.0)
+            .with_encoding(EncodingFormat::Int32)
+            .with_samples(Samples::Int(vec![1, -2, 3, -4, 100000, -100000]));
 
         let encoded = encode(&record).unwrap();
         assert_eq!(encoded.len(), 512);
@@ -453,12 +456,13 @@ mod tests {
         assert_eq!(decoded.location, "00");
         assert_eq!(decoded.channel, "BHZ");
         assert_eq!(decoded.quality, 'D');
-        assert_eq!(decoded.start_time.year, 2025);
-        assert_eq!(decoded.start_time.day, 100);
-        assert_eq!(decoded.start_time.hour, 12);
-        assert_eq!(decoded.start_time.minute, 30);
-        assert_eq!(decoded.start_time.second, 45);
-        assert_eq!(decoded.start_time.fract, 1234);
+        let btime = decoded.start_time.to_btime();
+        assert_eq!(btime.year, 2025);
+        assert_eq!(btime.day, 100);
+        assert_eq!(btime.hour, 12);
+        assert_eq!(btime.minute, 30);
+        assert_eq!(btime.second, 45);
+        assert_eq!(btime.fract, 1234);
         assert_eq!(decoded.sample_rate, 20.0);
         assert_eq!(decoded.encoding, EncodingFormat::Int32);
         assert_eq!(

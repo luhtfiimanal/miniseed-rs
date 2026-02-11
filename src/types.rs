@@ -1,8 +1,26 @@
-//! Shared types: [`ByteOrder`] and [`EncodingFormat`].
+//! Shared types: [`ByteOrder`], [`EncodingFormat`], and [`FormatVersion`].
 
 use std::fmt;
 
 use crate::{MseedError, Result};
+
+/// miniSEED format version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatVersion {
+    /// miniSEED v2 (SEED Manual, 48-byte fixed header + blockettes).
+    V2,
+    /// miniSEED v3 (FDSN, 40-byte fixed header, little-endian).
+    V3,
+}
+
+impl fmt::Display for FormatVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::V2 => write!(f, "miniSEED v2"),
+            Self::V3 => write!(f, "miniSEED v3"),
+        }
+    }
+}
 
 /// Byte order for multi-byte fields in a miniSEED record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

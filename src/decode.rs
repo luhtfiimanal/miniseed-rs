@@ -1,175 +1,47 @@
-//! Decode miniSEED v2 records from raw bytes.
+//! Decode miniSEED records from raw bytes.
 //!
-//! The main entry point is [`decode()`], which parses a single miniSEED v2
-//! record (any power-of-2 length: 256, 512, 4096, etc.) into an
-//! [`MseedRecord`]. For multi-record data, see
-//! [`MseedReader`](crate::MseedReader).
+//! The main entry point is [`decode()`], which auto-detects the format version
+//! (v2 or v3) and parses a single miniSEED record into an [`MseedRecord`].
+//! For multi-record data, see [`MseedReader`](crate::MseedReader).
 
-use std::fmt;
-
+use crate::record::{MseedRecord, Samples};
+use crate::sid::SourceId;
 use crate::steim;
-use crate::types::{ByteOrder, EncodingFormat};
+use crate::time::{BTime, NanoTime};
+use crate::types::{ByteOrder, EncodingFormat, FormatVersion};
 use crate::{MseedError, Result};
 
-/// Decoded miniSEED v2 record.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MseedRecord {
-    pub sequence_number: String,
-    pub quality: char,
-    pub station: String,
-    pub location: String,
-    pub channel: String,
-    pub network: String,
-    pub start_time: BTime,
-    pub sample_rate: f64,
-    pub encoding: EncodingFormat,
-    pub byte_order: ByteOrder,
-    pub record_length: u16,
-    pub samples: Samples,
-}
-
-/// BTIME timestamp (10 bytes in the fixed header).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BTime {
-    pub year: u16,
-    pub day: u16,
-    pub hour: u8,
-    pub minute: u8,
-    pub second: u8,
-    pub fract: u16, // 0.0001 second units
-}
-
-impl MseedRecord {
-    /// Create a new `MseedRecord` with sensible defaults.
-    ///
-    /// Defaults: sequence "000001", quality 'D', empty NSLC,
-    /// big-endian, 512-byte records, INT32, no samples.
-    pub fn new() -> Self {
-        Self {
-            sequence_number: "000001".into(),
-            quality: 'D',
-            station: String::new(),
-            location: String::new(),
-            channel: String::new(),
-            network: String::new(),
-            start_time: BTime {
-                year: 1970,
-                day: 1,
-                hour: 0,
-                minute: 0,
-                second: 0,
-                fract: 0,
-            },
-            sample_rate: 1.0,
-            encoding: EncodingFormat::Int32,
-            byte_order: ByteOrder::Big,
-            record_length: 512,
-            samples: Samples::Int(vec![]),
-        }
+/// Decode a single miniSEED record from raw bytes.
+///
+/// Auto-detects the format version:
+/// - **v3**: starts with `"MS"` magic bytes and version byte `3`
+/// - **v2**: starts with ASCII sequence number and quality indicator
+pub fn decode(data: &[u8]) -> Result<MseedRecord> {
+    if data.len() < 8 {
+        return Err(MseedError::RecordTooShort {
+            expected: 8,
+            actual: data.len(),
+        });
     }
 
-    /// Set network, station, location, and channel codes.
-    pub fn with_nslc(
-        mut self,
-        network: &str,
-        station: &str,
-        location: &str,
-        channel: &str,
-    ) -> Self {
-        self.network = network.into();
-        self.station = station.into();
-        self.location = location.into();
-        self.channel = channel.into();
-        self
+    // Auto-detect: v3 starts with "MS" + version byte 3
+    if data[0] == b'M' && data[1] == b'S' && data[2] == 3 {
+        return crate::decode_v3::decode_v3(data);
     }
 
-    /// Set the start time.
-    pub fn with_start_time(mut self, time: BTime) -> Self {
-        self.start_time = time;
-        self
+    // v2: bytes 0-5 should be ASCII digits/spaces, byte 6 is quality indicator
+    let looks_like_v2 = data[0..6].iter().all(|&b| b.is_ascii_digit() || b == b' ')
+        && matches!(data[6], b'D' | b'R' | b'Q' | b'M');
+
+    if !looks_like_v2 {
+        return Err(MseedError::UnrecognizedFormat);
     }
 
-    /// Set the sample rate in Hz.
-    pub fn with_sample_rate(mut self, rate: f64) -> Self {
-        self.sample_rate = rate;
-        self
-    }
-
-    /// Set the encoding format.
-    pub fn with_encoding(mut self, enc: EncodingFormat) -> Self {
-        self.encoding = enc;
-        self
-    }
-
-    /// Set the sample data.
-    pub fn with_samples(mut self, samples: Samples) -> Self {
-        self.samples = samples;
-        self
-    }
-
-    /// Return the NSLC identifier: `"NET.STA.LOC.CHA"`.
-    pub fn nslc(&self) -> String {
-        format!(
-            "{}.{}.{}.{}",
-            self.network, self.station, self.location, self.channel
-        )
-    }
-}
-
-impl Default for MseedRecord {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for MseedRecord {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} | {} | {} Hz | {} samples ({})",
-            self.nslc(),
-            self.start_time,
-            self.sample_rate,
-            self.samples.len(),
-            self.encoding,
-        )
-    }
-}
-
-impl fmt::Display for BTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:04}-{:03} {:02}:{:02}:{:02}.{:04}",
-            self.year, self.day, self.hour, self.minute, self.second, self.fract
-        )
-    }
-}
-
-/// Decoded sample data.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Samples {
-    Int(Vec<i32>),
-    Float(Vec<f32>),
-    Double(Vec<f64>),
-}
-
-impl Samples {
-    pub fn len(&self) -> usize {
-        match self {
-            Samples::Int(v) => v.len(),
-            Samples::Float(v) => v.len(),
-            Samples::Double(v) => v.len(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+    decode_v2(data)
 }
 
 /// Decode a single miniSEED v2 record from raw bytes.
-pub fn decode(data: &[u8]) -> Result<MseedRecord> {
+fn decode_v2(data: &[u8]) -> Result<MseedRecord> {
     if data.len() < 48 {
         return Err(MseedError::RecordTooShort {
             expected: 48,
@@ -200,7 +72,7 @@ pub fn decode(data: &[u8]) -> Result<MseedRecord> {
         .to_string();
 
     // BTIME (bytes 20-29)
-    let start_time = BTime {
+    let btime = BTime {
         year: u16::from_be_bytes([data[20], data[21]]),
         day: u16::from_be_bytes([data[22], data[23]]),
         hour: data[24],
@@ -209,6 +81,7 @@ pub fn decode(data: &[u8]) -> Result<MseedRecord> {
         // byte 27 is unused
         fract: u16::from_be_bytes([data[28], data[29]]),
     };
+    let start_time = NanoTime::from_btime(&btime);
 
     let num_samples = u16::from_be_bytes([data[30], data[31]]) as usize;
     let sample_rate_factor = i16::from_be_bytes([data[32], data[33]]);
@@ -227,7 +100,7 @@ pub fn decode(data: &[u8]) -> Result<MseedRecord> {
     } else {
         ByteOrder::Little
     };
-    let record_length = 1u16 << record_length_power;
+    let record_length = 1u32 << record_length_power;
 
     let encoding_format = EncodingFormat::from_code(encoding)?;
 
@@ -235,19 +108,27 @@ pub fn decode(data: &[u8]) -> Result<MseedRecord> {
     let data_section = &data[data_offset..record_length as usize];
     let samples = decode_data(data_section, encoding_format, num_samples, byte_order)?;
 
+    let source_id = SourceId::from_nslc(&network, &station, &location, &channel);
+
     Ok(MseedRecord {
-        sequence_number,
-        quality,
+        format_version: FormatVersion::V2,
+        network,
         station,
         location,
         channel,
-        network,
+        source_id,
         start_time,
         sample_rate,
         encoding: encoding_format,
+        samples,
+        sequence_number,
+        quality,
         byte_order,
         record_length,
-        samples,
+        flags: 0,
+        publication_version: 0,
+        extra_headers: String::new(),
+        crc: 0,
     })
 }
 
@@ -287,7 +168,7 @@ fn find_blockette_1000(data: &[u8], mut offset: usize) -> Result<(u8, u8, u8)> {
     }
 }
 
-fn decode_data(
+pub(crate) fn decode_data(
     data: &[u8],
     encoding: EncodingFormat,
     num_samples: usize,
@@ -536,33 +417,35 @@ mod tests {
                 expected["sample_rate"].as_f64().unwrap(),
                 "{name}: sample_rate"
             );
+            // NanoTime fields: convert from BTime-style expected values
+            let btime = record.start_time.to_btime();
             assert_eq!(
-                record.start_time.year,
+                btime.year,
                 expected["year"].as_u64().unwrap() as u16,
                 "{name}: year"
             );
             assert_eq!(
-                record.start_time.day,
+                btime.day,
                 expected["day"].as_u64().unwrap() as u16,
                 "{name}: day"
             );
             assert_eq!(
-                record.start_time.hour,
+                btime.hour,
                 expected["hour"].as_u64().unwrap() as u8,
                 "{name}: hour"
             );
             assert_eq!(
-                record.start_time.minute,
+                btime.minute,
                 expected["minute"].as_u64().unwrap() as u8,
                 "{name}: minute"
             );
             assert_eq!(
-                record.start_time.second,
+                btime.second,
                 expected["second"].as_u64().unwrap() as u8,
                 "{name}: second"
             );
             assert_eq!(
-                record.start_time.fract,
+                btime.fract,
                 expected["fract"].as_u64().unwrap() as u16,
                 "{name}: fract"
             );
@@ -689,6 +572,60 @@ mod tests {
 
             let num = v["num_samples"].as_u64().unwrap() as usize;
             assert_eq!(record.samples.len(), num, "{name}: sample count");
+        }
+    }
+
+    #[test]
+    fn test_autodetect_v3_via_decode() {
+        // Verify top-level decode() auto-detects v3 records
+        let vectors = load_vectors("v3_header_vectors.json");
+        let arr = vectors.as_array().unwrap();
+
+        for v in arr {
+            let name = v["name"].as_str().unwrap();
+            let raw = decode_b64(v["record_b64"].as_str().unwrap());
+            let expected = &v["expected"];
+
+            // Use top-level decode() — should auto-detect v3
+            let record = decode(&raw).unwrap_or_else(|e| {
+                panic!("auto-detect decode failed for {name}: {e}");
+            });
+
+            assert_eq!(
+                record.format_version,
+                crate::types::FormatVersion::V3,
+                "{name}: should be v3"
+            );
+            assert_eq!(
+                record.station,
+                expected["station"].as_str().unwrap(),
+                "{name}: station"
+            );
+            assert_eq!(
+                record.samples.len(),
+                expected["num_samples"].as_u64().unwrap() as usize,
+                "{name}: num_samples"
+            );
+        }
+    }
+
+    #[test]
+    fn test_autodetect_v2_via_decode() {
+        // Verify top-level decode() still auto-detects v2 records
+        let vectors = load_vectors("header_vectors.json");
+        let v = &vectors.as_array().unwrap()[0];
+        let raw = decode_b64(v["record_b64"].as_str().unwrap());
+
+        let record = decode(&raw).unwrap();
+        assert_eq!(record.format_version, crate::types::FormatVersion::V2);
+    }
+
+    #[test]
+    fn test_unrecognized_format() {
+        let garbage = vec![0xFF; 64];
+        match decode(&garbage) {
+            Err(MseedError::UnrecognizedFormat) => {}
+            other => panic!("expected UnrecognizedFormat, got: {other:?}"),
         }
     }
 }

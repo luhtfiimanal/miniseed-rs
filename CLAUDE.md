@@ -1,6 +1,6 @@
 # CLAUDE.md — miniseed-rs
 
-Pure Rust miniSEED v2 decoder and encoder. Zero unsafe, zero C dependency. Apache 2.0.
+Pure Rust miniSEED v2 and v3 decoder and encoder. Zero unsafe, zero C dependency. Apache 2.0.
 
 ## CRITICAL
 
@@ -11,23 +11,30 @@ Pure Rust miniSEED v2 decoder and encoder. Zero unsafe, zero C dependency. Apach
 
 ## Scope
 
-**miniSEED v2** (FDSN SEED Manual, 512-byte records):
+**miniSEED v2 + v3** with automatic format detection:
 
-- **Decode**: Fixed header (48 bytes) + Blockette 1000 + data section
-- **Encode**: Struct → miniSEED record bytes
-- **Compression**: Steim1, Steim2 (decode + encode)
-- **Uncompressed**: INT16, INT32, FLOAT32, FLOAT64
-- **No miniSEED v3** (different format, separate scope)
+- **Decode**: Auto-detect v2/v3, parse headers, decode data
+- **Encode**: MseedRecord → miniSEED bytes (v2 or v3 based on format_version)
+- **Compression**: Steim1, Steim2 (shared between v2/v3, always BE)
+- **Uncompressed**: INT16, INT32, FLOAT32, FLOAT64 (v2: configurable endian; v3: always LE)
+- **v3 extras**: CRC-32C, FDSN Source Identifiers, NanoTime, variable-length records
 
 ## Module Structure
 
 ```
 src/
-  lib.rs        -- re-exports + crate doc
-  error.rs      -- MseedError enum (thiserror)
-  decode.rs     -- decode(&[u8]) → MseedRecord
-  encode.rs     -- encode(MseedRecord) → Vec<u8>
-  steim.rs      -- Steim1/2 compress + decompress
+  lib.rs         -- re-exports + crate doc
+  error.rs       -- MseedError enum (thiserror)
+  record.rs      -- MseedRecord (unified v2+v3) + Samples
+  time.rs        -- NanoTime + BTime
+  sid.rs         -- SourceId (FDSN Source Identifier)
+  crc.rs         -- CRC-32C (Castagnoli) for v3
+  decode.rs      -- auto-detect dispatcher + v2 decode
+  decode_v3.rs   -- v3 decode
+  encode.rs      -- version dispatcher + v2 encode
+  encode_v3.rs   -- v3 encode
+  steim.rs       -- Steim1/2 compress + decompress (shared)
+  reader.rs      -- MseedReader iterator (v2+v3+mixed)
 ```
 
 ## Commands
@@ -48,19 +55,12 @@ cd pyscripts && uv run basedpyright src
 
 ## TDD Strategy
 
-Python/ObsPy generates test vectors → Rust tests assert against them.
+Python/pymseed generates test vectors → Rust tests assert against them.
 
 1. `cd pyscripts && uv run python -m pyscripts.generate_vectors`
 2. Write Rust test loading `test_vectors/*.json` — RED
 3. Implement Rust code — GREEN
-4. Validate: decoded samples exactly match ObsPy output
-
-### Test Vector Approach
-
-ObsPy can:
-- Read real miniSEED files and expose raw bytes + decoded samples
-- Create synthetic miniSEED records with known content
-- Encode with Steim1/Steim2 and provide raw compressed bytes
+4. Validate: decoded samples exactly match pymseed/libmseed output
 
 Test vectors saved as JSON in `pyscripts/test_vectors/` (gitignored, regenerate locally).
 
@@ -71,65 +71,52 @@ Test vectors saved as JSON in `pyscripts/test_vectors/` (gitignored, regenerate 
 - No `unsafe` anywhere
 - pyscripts: `basedpyright` strict + `ruff`
 
-## miniSEED v2 Record Format (512 bytes)
+## miniSEED v2 Record Format
 
 ```
-Bytes 0-47:   Fixed header
+Bytes 0-47:   Fixed header (big-endian)
               ├─ [0..6]    Sequence number (ASCII digits)
               ├─ [6]       Data quality indicator (D, R, Q, M)
-              ├─ [7]       Reserved
-              ├─ [8..13]   Station code (ASCII, right-padded spaces)
+              ├─ [8..13]   Station code
               ├─ [13..15]  Location code
               ├─ [15..18]  Channel code
               ├─ [18..20]  Network code
-              ├─ [20..30]  Start time (BTIME: year, day, hour, min, sec, frac)
+              ├─ [20..30]  Start time (BTIME)
               ├─ [30..32]  Number of samples (u16 BE)
-              ├─ [32..34]  Sample rate factor (i16 BE)
-              ├─ [34..36]  Sample rate multiplier (i16 BE)
-              ├─ [36]      Activity flags
-              ├─ [37]      I/O and clock flags
-              ├─ [38]      Data quality flags
-              ├─ [39]      Number of blockettes that follow
-              ├─ [40..44]  Time correction (i32 BE)
-              ├─ [44..46]  Beginning of data (u16 BE)
-              └─ [46..48]  First blockette (u16 BE)
+              ├─ [32..36]  Sample rate factor + multiplier
+              ├─ [44..46]  Data offset (u16 BE)
+              └─ [46..48]  First blockette offset (u16 BE)
 
-Bytes 48+:    Blockette 1000 (8 bytes)
-              ├─ [0..2]    Blockette type = 1000 (u16 BE)
-              ├─ [2..4]    Next blockette offset (u16 BE)
-              ├─ [4]       Encoding format
-              ├─ [5]       Byte order (0=little, 1=big)
-              ├─ [6]       Record length (power of 2, e.g. 9 = 512)
-              └─ [7]       Reserved
-
-Data section: Steim1/2 compressed or uncompressed samples
+Bytes 48+:    Blockette 1000 (encoding, byte order, record length power)
+Data section: Steim1/2 or uncompressed samples
 ```
 
-### Encoding Formats
-
-| Code | Format | Sample size |
-|------|--------|-------------|
-| 1 | INT16 | 2 bytes |
-| 3 | INT32 | 4 bytes |
-| 4 | FLOAT32 | 4 bytes |
-| 5 | FLOAT64 | 8 bytes |
-| 10 | Steim1 | variable |
-| 11 | Steim2 | variable |
-
-### BTIME (10 bytes)
+## miniSEED v3 Record Format
 
 ```
-[0..2]  year (u16 BE)
-[2..4]  day of year (u16 BE, 1-366)
-[4]     hour
-[5]     minute
-[6]     second
-[7]     unused
-[8..10] 0.0001 seconds (u16 BE)
+Bytes 0-39:   Fixed header (little-endian)
+              ├─ [0..2]    "MS" magic
+              ├─ [2]       Version = 3
+              ├─ [3]       Flags
+              ├─ [4..8]    Nanosecond (u32 LE)
+              ├─ [8..10]   Year (u16 LE)
+              ├─ [10..12]  Day of year (u16 LE)
+              ├─ [12..15]  Hour, Minute, Second
+              ├─ [15]      Encoding format
+              ├─ [16..24]  Sample rate (f64 LE)
+              ├─ [24..28]  Number of samples (u32 LE)
+              ├─ [28..32]  CRC-32C (u32 LE)
+              ├─ [32]      Publication version
+              ├─ [33]      SID length
+              ├─ [34..36]  Extra headers length (u16 LE)
+              └─ [36..40]  Data payload length (u32 LE)
+
+Variable:     [SID][Extra headers JSON][Data payload]
 ```
 
 ## References
 
 - FDSN SEED Manual v2.4: http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf
-- Steim compression: Appendix B of SEED Manual
+- FDSN miniSEED v3: https://docs.fdsn.org/projects/miniseed3/
 - libmseed (C reference impl): https://github.com/EarthScope/libmseed
+- pymseed: https://github.com/EarthScope/pymseed

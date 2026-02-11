@@ -1,6 +1,6 @@
-# miniseed
+# miniseed-rs
 
-Pure Rust miniSEED v2 decoder and encoder. Zero `unsafe`, zero C dependencies.
+Pure Rust miniSEED v2 and v3 decoder and encoder. Zero `unsafe`, zero C dependencies.
 
 [![Crates.io](https://img.shields.io/crates/v/miniseed-rs.svg)](https://crates.io/crates/miniseed-rs)
 [![docs.rs](https://docs.rs/miniseed-rs/badge.svg)](https://docs.rs/miniseed-rs)
@@ -10,19 +10,22 @@ Pure Rust miniSEED v2 decoder and encoder. Zero `unsafe`, zero C dependencies.
 
 ## What is miniSEED?
 
-[miniSEED](http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf) is the standard binary format for seismological waveform data, used by earthquake monitoring networks worldwide (IRIS, FDSN, BMKG, etc.). Each record is a self-contained packet (typically 512 or 4096 bytes, any power-of-2 length) containing station metadata, timestamps, and compressed sample data.
+[miniSEED](http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf) is the standard binary format for seismological waveform data, used by earthquake monitoring networks worldwide (IRIS, FDSN, BMKG, etc.). Each record is a self-contained packet containing station metadata, timestamps, and compressed sample data.
 
-This crate provides idiomatic Rust access to miniSEED v2 records with full encode/decode support.
+This crate provides idiomatic Rust access to both miniSEED v2 and v3 records with full encode/decode support and automatic format detection.
 
 ## Features
 
-- **Decode** miniSEED v2 records (any power-of-2 length: 256, 512, 4096, etc.)
+- **miniSEED v2 and v3** with automatic format detection
+- **Decode** records of any size (v2: power-of-2 lengths; v3: variable-length)
 - **Encode** `MseedRecord` structs back to valid miniSEED bytes
-- **Steim1/Steim2** compression and decompression (differential integer encoding)
+- **Steim1/Steim2** compression and decompression
 - **Uncompressed** formats: INT16, INT32, FLOAT32, FLOAT64
-- **Iterator-based reader** for multi-record files (`MseedReader`)
+- **Iterator-based reader** for multi-record files (`MseedReader`), supports mixed v2+v3 streams
 - **Builder pattern** for constructing records (`MseedRecord::new().with_*()`)
-- **Typed encoding** with `EncodingFormat` enum (no magic numbers)
+- **FDSN Source Identifiers** (`SourceId`) with NSLC conversion
+- **Nanosecond timestamps** (`NanoTime`) with v2 `BTime` compatibility
+- **CRC-32C** integrity checking for v3 records
 - **Zero unsafe** -- no FFI, no transmute, no raw pointers
 - **Zero C dependencies** -- pure Rust, compiles anywhere `rustc` runs
 
@@ -32,15 +35,15 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-miniseed-rs = "0.1"
+miniseed-rs = "0.2"
 ```
 
-### Decode a record
+### Decode a record (auto-detects v2 or v3)
 
 ```rust
 use miniseed_rs::{decode, encode, MseedRecord, Samples};
 
-// Build a record, encode it, then decode
+// Build a v2 record, encode, then decode
 let record = MseedRecord::new()
     .with_nslc("IU", "ANMO", "00", "BHZ")
     .with_sample_rate(20.0)
@@ -54,7 +57,7 @@ assert_eq!(decoded.station, "ANMO");
 assert_eq!(decoded.samples.len(), 3);
 ```
 
-### Read a multi-record file
+### Read a multi-record file (v2, v3, or mixed)
 
 ```rust
 use miniseed_rs::MseedReader;
@@ -63,27 +66,28 @@ let data = std::fs::read("waveform.mseed").unwrap();
 for result in MseedReader::new(&data) {
     let record = result.unwrap();
     println!("{}", record);
-    // Output: IU.ANMO.00.BHZ | 2025-100 12:30:45.0000 | 20 Hz | 399 samples (Steim2)
+    // Output: IU.ANMO.00.BHZ | 2025-100 12:30:45.000000000 | 20 Hz | 399 samples (Steim2) [miniSEED v2]
 }
 ```
 
-### Build a record from scratch
+### Build a v3 record
 
 ```rust
-use miniseed_rs::{MseedRecord, Samples, EncodingFormat, BTime, encode};
+use miniseed_rs::{MseedRecord, Samples, EncodingFormat, NanoTime, encode, decode};
 
-let record = MseedRecord::new()
-    .with_nslc("XX", "TEST", "00", "BHZ")
-    .with_start_time(BTime {
+let record = MseedRecord::new_v3()
+    .with_nslc("IU", "ANMO", "00", "BHZ")
+    .with_start_time(NanoTime {
         year: 2025, day: 100, hour: 12,
-        minute: 30, second: 45, fract: 0,
+        minute: 30, second: 45, nanosecond: 500_000_000,
     })
     .with_sample_rate(20.0)
-    .with_encoding(EncodingFormat::Steim1)
+    .with_encoding(EncodingFormat::Steim2)
     .with_samples(Samples::Int(vec![1, -2, 3, -4, 100, -50]));
 
 let bytes = encode(&record).unwrap();
-assert_eq!(bytes.len(), 512);
+let decoded = decode(&bytes).unwrap();
+assert_eq!(decoded.start_time.nanosecond, 500_000_000);
 ```
 
 ## API Overview
@@ -91,22 +95,26 @@ assert_eq!(bytes.len(), 512);
 ```rust
 // Top-level imports -- everything you need
 use miniseed_rs::{
-    decode, encode,           // functions
-    MseedRecord, MseedReader, // core types
-    BTime, Samples,           // data types
-    ByteOrder, EncodingFormat, // enums
-    MseedError, Result,       // error handling
+    decode, encode,                    // functions
+    MseedRecord, MseedReader,         // core types
+    NanoTime, BTime, Samples,         // data types
+    SourceId,                          // FDSN Source Identifier
+    ByteOrder, EncodingFormat,         // enums
+    FormatVersion,                     // v2 or v3
+    MseedError, Result,                // error handling
 };
 ```
 
 | Type | Description |
 |------|-------------|
-| `MseedRecord` | Decoded record with header metadata and sample data |
-| `MseedReader` | Iterator over multi-record byte slices |
-| `BTime` | BTIME timestamp (year, day-of-year, hour, min, sec, fract) |
+| `MseedRecord` | Unified record for v2 and v3 with header metadata and sample data |
+| `MseedReader` | Iterator over multi-record byte slices (v2, v3, or mixed) |
+| `NanoTime` | Timestamp with nanosecond precision (year, day, hour, min, sec, ns) |
+| `BTime` | Legacy v2 timestamp (year, day, hour, min, sec, 0.0001s fract) |
+| `SourceId` | FDSN Source Identifier with NSLC conversion |
 | `Samples` | Enum: `Int(Vec<i32>)`, `Float(Vec<f32>)`, `Double(Vec<f64>)` |
 | `EncodingFormat` | `Int16`, `Int32`, `Float32`, `Float64`, `Steim1`, `Steim2` |
-| `ByteOrder` | `Big`, `Little` |
+| `FormatVersion` | `V2`, `V3` |
 
 ## Supported Encoding Formats
 
@@ -123,25 +131,33 @@ use miniseed_rs::{
 
 ```
 src/
-  lib.rs       -- crate root, re-exports, runnable doc examples
-  types.rs     -- ByteOrder, EncodingFormat enums
-  decode.rs    -- decode(&[u8]) -> MseedRecord
-  encode.rs    -- encode(&MseedRecord) -> Vec<u8>
-  steim.rs     -- Steim1/2 compress + decompress
-  reader.rs    -- MseedReader iterator
-  error.rs     -- MseedError enum (thiserror)
+  lib.rs         -- crate root, re-exports, doc examples
+  types.rs       -- ByteOrder, EncodingFormat, FormatVersion
+  record.rs      -- MseedRecord (unified v2+v3), Samples
+  time.rs        -- NanoTime, BTime
+  sid.rs         -- SourceId (FDSN Source Identifier)
+  crc.rs         -- CRC-32C (Castagnoli) for v3
+  decode.rs      -- auto-detect decoder (v2/v3 dispatcher)
+  decode_v3.rs   -- v3-specific decode
+  encode.rs      -- version-dispatched encoder
+  encode_v3.rs   -- v3-specific encode
+  steim.rs       -- Steim1/2 compress + decompress (shared)
+  reader.rs      -- MseedReader iterator (v2+v3+mixed)
+  error.rs       -- MseedError enum (thiserror)
 ```
 
 ### Design Decisions
 
-- **Iterator over callback**: `MseedReader` implements `Iterator<Item = Result<MseedRecord>>` -- compose with standard iterator adapters
+- **Unified struct**: single `MseedRecord` for both v2 and v3 (like libmseed's MS3Record)
+- **Auto-detect**: `decode()` automatically identifies v2 vs v3 format
+- **Iterator over callback**: `MseedReader` implements `Iterator<Item = Result<MseedRecord>>`
 - **Enum over magic number**: `EncodingFormat::Steim1` instead of `10u8`
 - **Builder over boilerplate**: `MseedRecord::new().with_nslc(...)` with sensible defaults
 - **`&[u8]` over `Read` trait**: user calls `std::fs::read()` themselves -- simple, predictable, no hidden I/O
 
-### TDD with ObsPy
+### TDD with pymseed
 
-Test vectors are generated by Python/ObsPy scripts, ensuring bit-exact compatibility with the reference seismological toolchain:
+Test vectors are generated by Python/pymseed scripts, ensuring bit-exact compatibility with libmseed for both v2 and v3:
 
 ```bash
 cd pyscripts && uv run python -m pyscripts.generate_vectors
@@ -152,7 +168,7 @@ cargo test
 
 ```bash
 cargo build                     # build
-cargo test                      # 19 unit + 1 integration + 4 doc tests
+cargo test                      # all tests
 cargo clippy -- -D warnings     # lint (strict)
 cargo fmt -- --check            # format check
 cargo doc --no-deps --open      # browse docs locally
@@ -160,9 +176,10 @@ cargo doc --no-deps --open      # browse docs locally
 
 ## References
 
-- [FDSN SEED Manual v2.4](http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf) -- the specification
+- [FDSN SEED Manual v2.4](http://www.fdsn.org/pdf/SEEDManual_V2.4.pdf) -- v2 specification
+- [FDSN miniSEED v3 specification](https://docs.fdsn.org/projects/miniseed3/) -- v3 specification
 - [libmseed](https://github.com/EarthScope/libmseed) -- C reference implementation
-- [ObsPy](https://github.com/obspy/obspy) -- Python seismology framework (used for test vector generation)
+- [pymseed](https://github.com/EarthScope/pymseed) -- Python wrapper (used for test vector generation)
 
 ## License
 

@@ -1,11 +1,13 @@
 //! Iterator-based reader for multi-record miniSEED data.
 //!
 //! Use [`MseedReader`] to iterate over concatenated records in a byte slice.
+//! Supports mixed v2 and v3 records in the same stream.
 
 use crate::Result;
-use crate::decode::{self, MseedRecord};
+use crate::decode;
+use crate::record::MseedRecord;
 
-/// Iterator over miniSEED v2 records in a byte slice.
+/// Iterator over miniSEED records (v2 and/or v3) in a byte slice.
 ///
 /// Each call to `next()` decodes the next record and advances past it.
 /// Iteration stops when the data is exhausted or a decode error occurs.
@@ -47,12 +49,12 @@ impl Iterator for MseedReader<'_> {
 
         let remaining = &self.data[self.offset..];
 
-        // Need at least 48 bytes for the fixed header to read record_length
-        if remaining.len() < 48 {
+        // Need at least 8 bytes to detect the format
+        if remaining.len() < 8 {
             return None;
         }
 
-        // Peek at blockette 1000 to determine record length
+        // Peek at record to determine its length
         let record_length = match peek_record_length(remaining) {
             Ok(len) => len,
             Err(e) => {
@@ -80,8 +82,25 @@ impl Iterator for MseedReader<'_> {
     }
 }
 
-/// Peek at a record's blockette 1000 to determine the record length.
+/// Peek at a record to determine its length.
+///
+/// Auto-detects v2 vs v3 format:
+/// - **v3**: reads SID length, extra headers length, and data payload length from header
+/// - **v2**: walks blockettes to find Blockette 1000 and reads the record length power
 fn peek_record_length(data: &[u8]) -> Result<usize> {
+    // Check for v3: starts with "MS" + version 3
+    if data.len() >= 40 && data[0] == b'M' && data[1] == b'S' && data[2] == 3 {
+        return crate::decode_v3::peek_v3_record_length(data);
+    }
+
+    // v2: need at least 48 bytes for the fixed header
+    if data.len() < 48 {
+        return Err(crate::MseedError::RecordTooShort {
+            expected: 48,
+            actual: data.len(),
+        });
+    }
+
     let first_blockette = u16::from_be_bytes([data[46], data[47]]) as usize;
 
     // Walk blockettes to find blockette 1000
@@ -111,32 +130,25 @@ fn peek_record_length(data: &[u8]) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decode::{BTime, Samples};
     use crate::encode;
-    use crate::types::{ByteOrder, EncodingFormat};
+    use crate::record::Samples;
+    use crate::time::{BTime, NanoTime};
+    use crate::types::EncodingFormat;
 
     fn make_test_record(station: &str, samples: Vec<i32>) -> MseedRecord {
-        MseedRecord {
-            sequence_number: "000001".into(),
-            quality: 'D',
-            station: station.into(),
-            location: "00".into(),
-            channel: "BHZ".into(),
-            network: "XX".into(),
-            start_time: BTime {
+        MseedRecord::new()
+            .with_nslc("XX", station, "00", "BHZ")
+            .with_start_time(NanoTime::from_btime(&BTime {
                 year: 2025,
                 day: 1,
                 hour: 0,
                 minute: 0,
                 second: 0,
                 fract: 0,
-            },
-            sample_rate: 20.0,
-            encoding: EncodingFormat::Int32,
-            byte_order: ByteOrder::Big,
-            record_length: 512,
-            samples: Samples::Int(samples),
-        }
+            }))
+            .with_sample_rate(20.0)
+            .with_encoding(EncodingFormat::Int32)
+            .with_samples(Samples::Int(samples))
     }
 
     #[test]
@@ -177,33 +189,21 @@ mod tests {
     #[test]
     fn test_reader_mixed_record_sizes() {
         // 512-byte record + 4096-byte record in one stream
-        let small = MseedRecord {
-            sequence_number: "000001".into(),
-            quality: 'D',
-            station: "SM".into(),
-            location: "00".into(),
-            channel: "BHZ".into(),
-            network: "XX".into(),
-            start_time: BTime {
+        let small = make_test_record("SM", vec![1, 2, 3]);
+        let big = MseedRecord::new()
+            .with_nslc("XX", "LG", "00", "BHZ")
+            .with_start_time(NanoTime::from_btime(&BTime {
                 year: 2025,
                 day: 1,
                 hour: 0,
                 minute: 0,
                 second: 0,
                 fract: 0,
-            },
-            sample_rate: 20.0,
-            encoding: EncodingFormat::Int32,
-            byte_order: ByteOrder::Big,
-            record_length: 512,
-            samples: Samples::Int(vec![1, 2, 3]),
-        };
-        let big = MseedRecord {
-            record_length: 4096,
-            station: "LG".into(),
-            samples: Samples::Int((0..500).collect()),
-            ..small.clone()
-        };
+            }))
+            .with_sample_rate(20.0)
+            .with_encoding(EncodingFormat::Int32)
+            .with_record_length(4096)
+            .with_samples(Samples::Int((0..500).collect()));
 
         let mut data = encode::encode(&small).unwrap();
         assert_eq!(data.len(), 512);
@@ -282,7 +282,7 @@ mod tests {
                 assert_eq!(rec.station, exp_station, "{name}: station");
                 assert_eq!(
                     rec.record_length,
-                    exp["record_length"].as_u64().unwrap() as u16,
+                    exp["record_length"].as_u64().unwrap() as u32,
                     "{name}: record_length for {exp_station}"
                 );
                 assert_eq!(
@@ -302,6 +302,83 @@ mod tests {
             b'+' => 62,
             b'/' => 63,
             _ => 0,
+        }
+    }
+
+    #[test]
+    fn test_reader_mixed_v2v3_from_vectors() {
+        let vectors_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("pyscripts")
+            .join("test_vectors");
+        let path = vectors_dir.join("mixed_v2v3_vectors.json");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
+        let vectors: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let arr = vectors.as_array().unwrap();
+
+        for v in arr {
+            let name = v["name"].as_str().unwrap();
+
+            let stream_b64 = v["stream_b64"].as_str().unwrap();
+            let stream_bytes = {
+                let mut result = Vec::new();
+                let bytes: Vec<u8> = stream_b64
+                    .bytes()
+                    .filter(|b| !matches!(b, b'\n' | b'\r' | b' '))
+                    .collect();
+                let mut i = 0;
+                while i + 3 < bytes.len() {
+                    let a = b64(bytes[i]);
+                    let b = b64(bytes[i + 1]);
+                    let c = b64(bytes[i + 2]);
+                    let d = b64(bytes[i + 3]);
+                    let triple = (a << 18) | (b << 12) | (c << 6) | d;
+                    result.push((triple >> 16) as u8);
+                    if bytes[i + 2] != b'=' {
+                        result.push((triple >> 8) as u8);
+                    }
+                    if bytes[i + 3] != b'=' {
+                        result.push(triple as u8);
+                    }
+                    i += 4;
+                }
+                result
+            };
+
+            let records: Vec<_> = MseedReader::new(&stream_bytes)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap_or_else(|e| panic!("reader failed for {name}: {e}"));
+
+            let expected_records = v["records"].as_array().unwrap();
+            assert_eq!(
+                records.len(),
+                expected_records.len(),
+                "{name}: record count"
+            );
+
+            for (rec, exp) in records.iter().zip(expected_records.iter()) {
+                let exp_station = exp["station"].as_str().unwrap();
+                let exp_version = exp["format_version"].as_u64().unwrap();
+                assert_eq!(rec.station, exp_station, "{name}: station");
+                assert_eq!(
+                    rec.record_length,
+                    exp["record_length"].as_u64().unwrap() as u32,
+                    "{name}: record_length for {exp_station}"
+                );
+                assert_eq!(
+                    rec.samples.len(),
+                    exp["num_samples"].as_u64().unwrap() as usize,
+                    "{name}: num_samples for {exp_station}"
+                );
+                let actual_version = match rec.format_version {
+                    crate::types::FormatVersion::V2 => 2u64,
+                    crate::types::FormatVersion::V3 => 3u64,
+                };
+                assert_eq!(
+                    actual_version, exp_version,
+                    "{name}: format_version for {exp_station}"
+                );
+            }
         }
     }
 

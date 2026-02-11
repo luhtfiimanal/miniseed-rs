@@ -1,0 +1,71 @@
+[
+  {
+    "name": "v3_header_0",
+    "record_b64": "TVMDAAAAAADoBw8ACh4ACwAAAAAAADRAFAAAAAyvhaEAFQAAQAAAAEZEU046SVVfQU5NT18wMF9CX0hfWgPwAAAAAAAAAAAAE4ARERGBERERQhCEIQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "record_length": 125,
+    "expected": {
+      "sid": "FDSN:IU_ANMO_00_B_H_Z",
+      "network": "IU",
+      "station": "ANMO",
+      "location": "00",
+      "channel": "BHZ",
+      "sample_rate": 20.0,
+      "year": 2024,
+      "day": 15,
+      "hour": 10,
+      "minute": 30,
+      "second": 0,
+      "nanosecond": 0,
+      "encoding_format": 11,
+      "num_samples": 20,
+      "flags": 0,
+      "pub_version": 0
+    }
+  },
+  {
+    "name": "v3_header_1",
+    "record_b64": "TVMDAABlzR3nB5gAAAAACwAAAAAAAFlAFAAAAI+uNEgAFAAAQAAAAEZEU046R0VfREFWXzEwX0hfSF9FA/AAAAAAAAAAAAATgBEREYERERFCEIQhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "record_length": 124,
+    "expected": {
+      "sid": "FDSN:GE_DAV_10_H_H_E",
+      "network": "GE",
+      "station": "DAV",
+      "location": "10",
+      "channel": "HHE",
+      "sample_rate": 100.0,
+      "year": 2023,
+      "day": 152,
+      "hour": 0,
+      "minute": 0,
+      "second": 0,
+      "nanosecond": 500000000,
+      "encoding_format": 11,
+      "num_samples": 20,
+      "flags": 0,
+      "pub_version": 0
+    }
+  },
+  {
+    "name": "v3_header_2",
+    "record_b64": "TVMDAGBDmTvpB20BFzs7CwAAAAAAAPA/FAAAADZdw3sAEgAAQAAAAEZEU046SlBfVFNLX19MX0hfTgPwAAAAAAAAAAAAE4ARERGBERERQhCEIQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "record_length": 122,
+    "expected": {
+      "sid": "FDSN:JP_TSK__L_H_N",
+      "network": "JP",
+      "station": "TSK",
+      "location": "",
+      "channel": "LHN",
+      "sample_rate": 1.0,
+      "year": 2025,
+      "day": 365,
+      "hour": 23,
+      "minute": 59,
+      "second": 59,
+      "nanosecond": 999900000,
+      "encoding_format": 11,
+      "num_samples": 20,
+      "flags": 0,
+      "pub_version": 0
+    }
+  }
+]

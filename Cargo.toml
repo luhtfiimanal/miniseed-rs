@@ -1,9 +1,9 @@
 [package]
 name = "miniseed-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Pure Rust miniSEED v2 decoder and encoder"
+description = "Pure Rust miniSEED v2 and v3 decoder and encoder"
 repository = "https://github.com/luhtfiimanal/miniseed-rs"
 readme = "README.md"
 keywords = ["seismic", "miniseed", "steim", "mseed", "fdsn"]
