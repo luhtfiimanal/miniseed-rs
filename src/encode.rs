@@ -69,9 +69,16 @@ fn encode_v2(record: &MseedRecord) -> Result<Vec<u8>> {
     buf[32..34].copy_from_slice(&factor.to_be_bytes());
     buf[34..36].copy_from_slice(&multiplier.to_be_bytes());
 
-    // Activity flags (36), I/O flags (37), Data quality flags (38): all 0
-    // Number of blockettes (byte 39)
-    buf[39] = 1;
+    // Activity flags (36), I/O & Clock flags (37), Data-quality flags (38)
+    buf[36] = record.activity_flags;
+    buf[37] = record.io_clock_flags;
+    buf[38] = record.data_quality_flags;
+    // Number of blockettes (byte 39): 1 (B1000) or 2 (B1000 + B1001 when timing quality is set)
+    buf[39] = if record.timing_quality.is_some() {
+        2
+    } else {
+        1
+    };
 
     // Time correction (bytes 40-43): 0
     // Beginning of data (bytes 44-45): set after encoding data
@@ -81,8 +88,13 @@ fn encode_v2(record: &MseedRecord) -> Result<Vec<u8>> {
     // --- Blockette 1000 (8 bytes at offset 48) ---
     // Blockette type = 1000
     buf[48..50].copy_from_slice(&1000u16.to_be_bytes());
-    // Next blockette offset = 0 (no more blockettes)
-    buf[50..52].copy_from_slice(&0u16.to_be_bytes());
+    // Next blockette offset: points to Blockette 1001 (offset 56) when present, else 0
+    let b1000_next: u16 = if record.timing_quality.is_some() {
+        56
+    } else {
+        0
+    };
+    buf[50..52].copy_from_slice(&b1000_next.to_be_bytes());
     // Encoding format
     buf[52] = record.encoding.to_code();
     // Byte order (0=little, 1=big)
@@ -95,11 +107,29 @@ fn encode_v2(record: &MseedRecord) -> Result<Vec<u8>> {
     // Reserved
     buf[55] = 0;
 
+    // --- Blockette 1001 (Data Extension, 8 bytes at offset 56) — only when timing quality is set ---
+    if let Some(tq) = record.timing_quality {
+        if rec_len < 64 {
+            return Err(MseedError::EncodeError(
+                "record_length must be >= 64 to hold a Blockette 1001".into(),
+            ));
+        }
+        buf[56..58].copy_from_slice(&1001u16.to_be_bytes()); // blockette type
+        buf[58..60].copy_from_slice(&0u16.to_be_bytes()); // next blockette offset (last in chain)
+        buf[60] = tq; // timing quality, 0-100%
+        buf[61] = 0; // microsec (i8): sub-100us correction, unused (samples on a 5 ms grid)
+        buf[62] = 0; // reserved
+        buf[63] = 0; // frame count: 0 = unknown
+    }
+
     // --- Data section ---
     // For Steim: data must start at 64-byte boundary
     // For uncompressed: right after blockette 1000 (offset 56)
+    // A Blockette 1001 occupies 56..64, so when present the data must start at 64 even for
+    // uncompressed encodings (Steim already starts at 64, so its layout is unchanged).
     let data_offset: usize = match record.encoding {
         EncodingFormat::Steim1 | EncodingFormat::Steim2 => 64,
+        _ if record.timing_quality.is_some() => 64,
         _ => 56,
     };
 
@@ -469,5 +499,89 @@ mod tests {
             decoded.samples,
             Samples::Int(vec![1, -2, 3, -4, 100000, -100000])
         );
+    }
+
+    #[test]
+    fn test_v2_timing_quality_and_clock_flags_roundtrip() {
+        use crate::time::NanoTime;
+
+        // GPS-locked record: clock locked, time NOT questionable, timing quality 100.
+        let locked = MseedRecord::new()
+            .with_nslc("XX", "PB", "00", "HHZ")
+            .with_start_time(NanoTime {
+                year: 2026,
+                day: 1,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                nanosecond: 0,
+            })
+            .with_sample_rate(200.0)
+            .with_encoding(EncodingFormat::Steim2)
+            .with_clock_locked(true)
+            .with_time_questionable(false)
+            .with_timing_quality(100)
+            .with_samples(Samples::Int((0..200).collect()));
+
+        let bytes = encode(&locked).unwrap();
+        // Steim2 record length is unchanged (B1001 fits the existing 56..64 gap).
+        assert_eq!(bytes.len(), 512);
+        // Two blockettes now (1000 + 1001).
+        assert_eq!(bytes[39], 2, "blockette count");
+        // I/O & clock flags byte 37 bit 5 set; data-quality byte 38 bit 7 clear.
+        assert_eq!(bytes[37] & 0x20, 0x20, "clock-locked bit set");
+        assert_eq!(bytes[38] & 0x80, 0, "time-questionable bit clear");
+        // B1000 chains to B1001 at offset 56.
+        assert_eq!(
+            u16::from_be_bytes([bytes[50], bytes[51]]),
+            56,
+            "B1000 next->56"
+        );
+        // B1001 header at 56.
+        assert_eq!(
+            u16::from_be_bytes([bytes[56], bytes[57]]),
+            1001,
+            "B1001 type"
+        );
+        assert_eq!(
+            u16::from_be_bytes([bytes[58], bytes[59]]),
+            0,
+            "B1001 is last"
+        );
+        assert_eq!(bytes[60], 100, "timing quality byte");
+
+        let back = decode::decode(&bytes).unwrap();
+        assert_eq!(back.timing_quality, Some(100));
+        assert_eq!(back.io_clock_flags & 0x20, 0x20);
+        assert_eq!(back.data_quality_flags & 0x80, 0);
+        assert_eq!(back.samples, locked.samples);
+
+        // Free-running record: not locked, time questionable, degraded timing quality.
+        let freerun = MseedRecord::new()
+            .with_nslc("XX", "PB", "00", "HHZ")
+            .with_sample_rate(200.0)
+            .with_encoding(EncodingFormat::Steim2)
+            .with_clock_locked(false)
+            .with_time_questionable(true)
+            .with_timing_quality(50)
+            .with_samples(Samples::Int((0..10).collect()));
+
+        let fr = encode(&freerun).unwrap();
+        assert_eq!(fr[37] & 0x20, 0, "freerun: clock not locked");
+        assert_eq!(fr[38] & 0x80, 0x80, "freerun: time questionable set");
+        let fr_back = decode::decode(&fr).unwrap();
+        assert_eq!(fr_back.timing_quality, Some(50));
+        assert_eq!(fr_back.data_quality_flags & 0x80, 0x80);
+
+        // A record with no timing quality emits exactly one blockette (backward compatible).
+        let plain = MseedRecord::new()
+            .with_nslc("XX", "PB", "00", "HHZ")
+            .with_sample_rate(200.0)
+            .with_encoding(EncodingFormat::Steim2)
+            .with_samples(Samples::Int((0..10).collect()));
+        let pl = encode(&plain).unwrap();
+        assert_eq!(pl[39], 1, "no B1001 when timing quality unset");
+        assert_eq!(u16::from_be_bytes([pl[50], pl[51]]), 0, "B1000 next->0");
+        assert_eq!(decode::decode(&pl).unwrap().timing_quality, None);
     }
 }
