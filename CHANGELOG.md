@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.1] - 2026-06-25
+
+miniSEED v2 timing-quality metadata. Backward compatible with 0.2.0.
+
+### Added
+
+- `MseedRecord` v2 fields: `activity_flags`, `io_clock_flags`, `data_quality_flags`,
+  and `timing_quality: Option<u8>`
+- Builder setters `with_clock_locked()` (I/O & Clock flags, byte 37 bit 5),
+  `with_time_questionable()` (Data-quality flags, byte 38 bit 7), and
+  `with_timing_quality()` (0-100, emits Blockette 1001)
+- `encode_v2` writes the fixed-section flag bytes (36-38) and appends a Blockette
+  1001 when timing quality is set; `decode_v2` reads them back
+- Records without timing quality encode byte-for-byte as before
+
 ## [0.2.0] - 2026-02-11
 
 miniSEED v3 support. Breaking changes from 0.1.0.
