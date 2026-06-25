@@ -91,6 +91,13 @@ fn decode_v2(data: &[u8]) -> Result<MseedRecord> {
     let data_offset = u16::from_be_bytes([data[44], data[45]]) as usize;
     let first_blockette = u16::from_be_bytes([data[46], data[47]]) as usize;
 
+    // SEED fixed-section flag bytes (data.len() >= 48 checked above).
+    let activity_flags = data[36];
+    let io_clock_flags = data[37];
+    let data_quality_flags = data[38];
+    // Blockette 1001 timing quality, if a B1001 is present in the blockette chain.
+    let timing_quality = find_blockette_1001(data, first_blockette);
+
     // Find Blockette 1000
     let (encoding, byte_order_val, record_length_power) =
         find_blockette_1000(data, first_blockette)?;
@@ -125,6 +132,10 @@ fn decode_v2(data: &[u8]) -> Result<MseedRecord> {
         quality,
         byte_order,
         record_length,
+        activity_flags,
+        io_clock_flags,
+        data_quality_flags,
+        timing_quality,
         flags: 0,
         publication_version: 0,
         extra_headers: String::new(),
@@ -163,6 +174,25 @@ fn find_blockette_1000(data: &[u8], mut offset: usize) -> Result<(u8, u8, u8)> {
 
         if next_offset == 0 {
             return Err(MseedError::MissingBlockette1000);
+        }
+        offset = next_offset;
+    }
+}
+
+/// Walk the blockette chain looking for a Blockette 1001; return its timing-quality byte (0-100).
+fn find_blockette_1001(data: &[u8], mut offset: usize) -> Option<u8> {
+    loop {
+        if offset + 4 > data.len() {
+            return None;
+        }
+        let blockette_type = u16::from_be_bytes([data[offset], data[offset + 1]]);
+        let next_offset = u16::from_be_bytes([data[offset + 2], data[offset + 3]]) as usize;
+        if blockette_type == 1001 {
+            // Timing quality is the byte at offset+4 within the blockette.
+            return data.get(offset + 4).copied();
+        }
+        if next_offset == 0 {
+            return None;
         }
         offset = next_offset;
     }

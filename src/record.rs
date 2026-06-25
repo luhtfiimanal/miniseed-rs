@@ -44,6 +44,16 @@ pub struct MseedRecord {
     /// Record length in bytes. Was `u16` in v0.1; now `u32` to support v3.
     pub record_length: u32,
 
+    // --- v2 timing/quality flags (SEED fixed-section + Blockette 1001) ---
+    /// SEED fixed-section Activity flags (byte 36). v2 only; 0 by default.
+    pub activity_flags: u8,
+    /// SEED fixed-section I/O and Clock flags (byte 37). Bit 5 (0x20) = "clock locked". v2 only.
+    pub io_clock_flags: u8,
+    /// SEED fixed-section Data-quality flags (byte 38). Bit 7 (0x80) = "time tag is questionable". v2 only.
+    pub data_quality_flags: u8,
+    /// Blockette-1001 timing quality (0-100%). `Some(_)` emits a Blockette 1001 on v2 encode. v2 only.
+    pub timing_quality: Option<u8>,
+
     // --- v3-specific (defaults for v2) ---
     pub flags: u8,
     pub publication_version: u8,
@@ -72,6 +82,10 @@ impl MseedRecord {
             quality: 'D',
             byte_order: ByteOrder::Big,
             record_length: 512,
+            activity_flags: 0,
+            io_clock_flags: 0,
+            data_quality_flags: 0,
+            timing_quality: None,
             flags: 0,
             publication_version: 0,
             extra_headers: String::new(),
@@ -96,6 +110,10 @@ impl MseedRecord {
             quality: 'D',
             byte_order: ByteOrder::Little,
             record_length: 0, // v3: variable length, set during encode
+            activity_flags: 0,
+            io_clock_flags: 0,
+            data_quality_flags: 0,
+            timing_quality: None,
             flags: 0,
             publication_version: 0,
             extra_headers: String::new(),
@@ -153,6 +171,38 @@ impl MseedRecord {
     /// Set the record length (power of 2 for v2, any value for v3).
     pub fn with_record_length(mut self, len: u32) -> Self {
         self.record_length = len;
+        self
+    }
+
+    /// Set the SEED "clock locked" bit (I/O & Clock flags, byte 37 bit 5). v2 encode only.
+    ///
+    /// Set `true` when the digitizer clock is disciplined (e.g. GPS-locked) for this record.
+    pub fn with_clock_locked(mut self, locked: bool) -> Self {
+        if locked {
+            self.io_clock_flags |= 0x20;
+        } else {
+            self.io_clock_flags &= !0x20;
+        }
+        self
+    }
+
+    /// Set the SEED "time tag is questionable" bit (Data-quality flags, byte 38 bit 7). v2 encode only.
+    ///
+    /// Set `true` when the record's start time is NOT trustworthy (e.g. free-running clock).
+    pub fn with_time_questionable(mut self, questionable: bool) -> Self {
+        if questionable {
+            self.data_quality_flags |= 0x80;
+        } else {
+            self.data_quality_flags &= !0x80;
+        }
+        self
+    }
+
+    /// Set the Blockette-1001 timing quality (0-100%). Emits a Blockette 1001 on v2 encode.
+    ///
+    /// This is the value tools such as ObsPy surface as `stats.mseed.blkt1001.timing_quality`.
+    pub fn with_timing_quality(mut self, quality: u8) -> Self {
+        self.timing_quality = Some(quality.min(100));
         self
     }
 
